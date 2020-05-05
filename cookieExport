@@ -1,0 +1,5 @@
+#!/bin/sh
+
+#COOKIE_DB="$HOME/.mozilla/firefox/*.default-release/cookies.sqlite"
+cp $HOME/.mozilla/firefox/*.default-release/cookies.sqlite cookies.sqlite
+sqlite3 cookies.sqlite "select name,value from moz_cookies WHERE host=\".sdamgia.ru\";" | awk 'BEGIN{ ORS=";" } { print $1 "=" $2 }'

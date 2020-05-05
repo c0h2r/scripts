@@ -1,0 +1,5 @@
+#!/bin/bash
+selection=$(ls $HOME/scripts/ | rofi -dmenu -b autoscript)
+[[ -z $selection ]] && exit
+autoscript $selection
+

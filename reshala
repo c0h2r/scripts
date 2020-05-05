@@ -1,0 +1,199 @@
+#!/usr/bin/python
+import requests
+import sys
+import re
+
+import pathlib
+import sqlite3
+import urllib.error
+import urllib.parse
+from typing import Iterator, Union
+
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher
+from cryptography.hazmat.primitives.ciphers.algorithms import AES
+from cryptography.hazmat.primitives.ciphers.modes import CBC
+from cryptography.hazmat.primitives.hashes import SHA1
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+# stolen from pycookiecheat
+
+
+def clean(decrypted: bytes) -> str:
+    r"""Strip padding from decrypted value.
+
+    Remove number indicated by padding
+    e.g. if last is '\x0e' then ord('\x0e') == 14, so take off 14.
+
+    Args:
+        decrypted: decrypted value
+    Returns:
+        Decrypted stripped of junk padding
+
+    """
+    last = decrypted[-1]
+    if isinstance(last, int):
+        return decrypted[:-last].decode("utf8")
+    return decrypted[: -ord(last)].decode("utf8")
+
+
+def chrome_decrypt(
+    encrypted_value: bytes, key: bytes, init_vector: bytes
+) -> str:
+    """Decrypt Chrome/Chromium's encrypted cookies.
+
+    Args:
+        encrypted_value: Encrypted cookie from Chrome/Chromium's cookie file
+        key: Key to decrypt encrypted_value
+        init_vector: Initialization vector for decrypting encrypted_value
+    Returns:
+        Decrypted value of encrypted_value
+
+    """
+    # Encrypted cookies should be prefixed with 'v10' or 'v11' according to the
+    # Chromium code. Strip it off.
+    encrypted_value = encrypted_value[3:]
+
+    cipher = Cipher(
+        algorithm=AES(key), mode=CBC(init_vector), backend=default_backend()
+    )
+    decryptor = cipher.decryptor()
+    decrypted = decryptor.update(encrypted_value) + decryptor.finalize()
+
+    return clean(decrypted)
+
+
+def chrome_cookies(
+    url: str,
+) -> dict:
+    config = {
+        "my_pass": "peanuts",
+        "iterations": 1,
+        "cookie_file": "~/.config/chromium/Default/Cookies",
+        "init_vector": b" " * 16,
+        "length": 16,
+        "salt": b"saltysalt",
+    }
+
+    cookie_file = str(pathlib.Path(config["cookie_file"]).expanduser())
+
+    config["my_pass"] = config["my_pass"].encode("utf8")
+
+    kdf = PBKDF2HMAC(
+        algorithm=SHA1(),
+        backend=default_backend(),
+        iterations=config["iterations"],
+        length=config["length"],
+        salt=config["salt"],
+    )
+    enc_key = kdf.derive(config["my_pass"])
+
+    parsed_url = urllib.parse.urlparse(url)
+    if parsed_url.scheme:
+        domain = parsed_url.netloc
+    else:
+        raise urllib.error.URLError("You must include a scheme with your URL.")
+
+    try:
+        conn = sqlite3.connect(cookie_file)
+    except sqlite3.OperationalError:
+        print("Unable to connect to cookie_file at: {}\n".format(cookie_file))
+        raise
+
+    # Check whether the column name is `secure` or `is_secure`
+    secure_column_name = "is_secure"
+    for (
+        sl_no,
+        column_name,
+        data_type,
+        is_null,
+        default_val,
+        pk,
+    ) in conn.execute("PRAGMA table_info(cookies)"):
+        if column_name == "secure":
+            secure_column_name = "secure"
+            break
+
+    sql = (
+        "select host_key, path, "
+        + secure_column_name
+        + ", expires_utc, name, value, encrypted_value "
+        "from cookies where host_key like ?"
+    )
+
+    cookies = dict()
+    for host_key in generate_host_keys(domain):
+        for (
+            hk,
+            path,
+            is_secure,
+            expires_utc,
+            cookie_key,
+            val,
+            enc_val,
+        ) in conn.execute(sql, (host_key,)):
+            # if there is a not encrypted value or if the encrypted value
+            # doesn't start with the 'v1[01]' prefix, return v
+            if val or (enc_val[:3] not in (b"v10", b"v11")):
+                pass
+            else:
+                val = chrome_decrypt(
+                    enc_val, key=enc_key, init_vector=config["init_vector"]
+                )
+            cookies[cookie_key] = val
+    conn.rollback()
+
+    # Save the file to destination
+    return cookies
+
+
+def generate_host_keys(hostname: str) -> Iterator[str]:
+    """Yield Chrome/Chromium keys for `hostname`, from least to most specific.
+
+    Given a hostname like foo.example.com, this yields the key sequence:
+
+    example.com
+    .example.com
+    foo.example.com
+    .foo.example.com
+
+    """
+    labels = hostname.split(".")
+    for i in range(2, len(labels) + 1):
+        domain = ".".join(labels[-i:])
+        yield domain
+        yield "." + domain
+#########################################
+
+
+#url = "https://resh.edu.ru/subject/lesson/5615/control/2/result/"
+url = input()
+print(url)
+regex = re.compile("http.?:\/\/resh.edu.ru\/subject\/lesson\/[0-9]*\/([^s][a-zA-Z]*\/[0-9]\/|train\/)")
+matched = regex.match(url)
+if matched:
+    url = matched.group()+"result/"
+else:
+    print("I wanted a link, not piece of shit!")
+    exit()
+print(url)
+cookies = chrome_cookies(url)
+headers = {
+    'Connection': 'keep-alive',
+    'Accept': '*/*',
+    'X-Requested-With': 'XMLHttpRequest',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.122 Safari/537.36',
+    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'Origin': 'https://resh.edu.ru',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    'Referer': url,
+    'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+}
+data = "answers=%7B%22220100%22%3A%7B%22RESPONSE1%22%3A%5B%22Gbc9742d6d42646a8a5514570a0a577a0+ONE_LINE%22%5D%7D%2C%22220101%22%3A%7B%22RESPONSE1%22%3A%5B%22G939b293d901d477183d467d3ea11c2b2+ORANGE%22%5D%7D%2C%22220102%22%3A%7B%22RESPONSE0%22%3A%22%D0%A8%D1%83%D1%85%D0%BE%D0%B2%22%7D%2C%22220103%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220104%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220105%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220106%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220107%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220108%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220109%22%3A%7B%22RESPONSE1%22%3A%5B%225c61c811-3432-4b6d-82ab-c932c28dc9a7%22%5D%7D%2C%22220110%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220111%22%3A%7B%22RESPONSE1%22%3Atrue%7D%2C%22220112%22%3A%7B%22RESPONSE1%22%3A%5B%22G632a56c42b374c18b6aa693d527a2a00+vd693ec4003534e849a15d4cddd0138f5%22%5D%7D%2C%22220113%22%3A%7B%22RESPONSE1%22%3A%5B%229dee3fa7-1914-4212-8f36-142e14a0f3c9+baf4d984-90e7-43b4-b3ec-2481a1831c15%22%2C%229dee3fa7-1914-4212-8f36-142e14a0f3c9+176e6308-2205-4e59-925d-b1327c61050d%22%2C%220f3151d2-281b-4231-b352-09bc4736d8a6+d46515fa-a9fe-40ad-9951-2909d9cffcac%22%2C%220f3151d2-281b-4231-b352-09bc4736d8a6+ee4e1b2c-78db-4188-ae09-76ec79ff0d32%22%5D%7D%7D"
+
+try:
+    print(requests.post(url, cookies=cookies, headers=headers, data=data).json())
+except:
+    print("Something went wrog")

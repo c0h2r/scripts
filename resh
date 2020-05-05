@@ -1,0 +1,7 @@
+#!/bin/bash
+id=$(wmctrl -l | grep -oP "(?<=)(0x\w+)(?=.*Российская электронная школа)")
+sleep 0.3
+xdotool key --window $id "ctrl+l"
+xdotool key --window $id "114"
+xdotool key --window $id "ctrl+a"
+res=$(xclip -o | reshala)

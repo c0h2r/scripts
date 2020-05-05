@@ -1,0 +1,10 @@
+#!/bin/bash
+result="$HOME/scripts/$1"
+if [[ -f  $result ]];
+then
+  echo "Already exists. Oppening via nvim."
+else
+  echo "#!/bin/bash" > $result
+  chmod +x $result
+fi
+kitty nvim $result

@@ -1,0 +1,8 @@
+#!/bin/bash
+nmap_result=$(sudo nmap -sn 192.168.0.0/24)
+devices=$(echo "$nmap_result" | awk '/^Nmap scan report/ {print $5" "$6}')
+MACs=$(echo "$nmap_result" | awk '/^MAC Address:/ {print $3" "$4" "$5" "$6}')
+count=$(echo "$nmap_result" | awk '/^Nmap done:/{print $6" "$7" "$8}')
+echo $devices
+#echo $MACs[0]
+#echo $count[0]

@@ -1,0 +1,4 @@
+#!/bin/bash
+selection=$(cat $HOME/scripts/.emoji_list | rofi -dmenu -b select emoji)
+[[ -z $selection ]] && exit
+echo $selection | xclip
